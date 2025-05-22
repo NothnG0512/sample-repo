@@ -1,0 +1,125 @@
+import requests
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# -------------------- CONFIGURATION --------------------
+
+# Moogsoft API
+MOOGSOFT_API_BASE = "https://your-moogsoft-url/api/v1"
+API_TOKEN = "your_api_token"
+
+HEADERS = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {API_TOKEN}"
+}
+
+# Email Config
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+EMAIL_SENDER = "your-email@gmail.com"
+EMAIL_PASSWORD = "your-email-password-or-app-password"
+EMAIL_RECEIVER = "receiver-email@example.com"
+
+# -------------------- FUNCTIONS --------------------
+
+def check_moogsoft_health():
+    """Check if the Moogsoft API is up and reachable."""
+    try:
+        response = requests.get(f"{MOOGSOFT_API_BASE}/alerts", headers=HEADERS, timeout=10)
+        if response.status_code == 200:
+            print("[✓] Moogsoft API is reachable.")
+            return True
+        else:
+            print(f"[✗] Moogsoft API status: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"[✗] Error connecting to Moogsoft API: {e}")
+        return False
+
+
+def get_recent_alerts(limit=10):
+    """Fetch last 10 alerts with high or critical severity."""
+    try:
+        params = {
+            "limit": limit,
+            "sort": "-last_event_time",  # Most recent first
+            "filter": "severity:high,critical"
+        }
+
+        response = requests.get(f"{MOOGSOFT_API_BASE}/alerts", headers=HEADERS, params=params)
+        response.raise_for_status()
+
+        alerts = response.json().get("alerts", [])
+        print(f"[i] Fetched {len(alerts)} high/critical alerts.")
+        return alerts
+
+    except Exception as e:
+        print(f"[✗] Failed to fetch alerts: {e}")
+        return []
+
+
+def check_ticket_created(alert):
+    """Determine if a ticket exists for a high/critical alert."""
+    ticket_fields = ["ticket_id", "external_reference", "integration_status"]
+    for field in ticket_fields:
+        if alert.get(field):
+            return True
+    return False
+
+
+def send_email(subject, body):
+    """Send email via SMTP when ticket is missing."""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = EMAIL_RECEIVER
+        msg['Subject'] = subject
+
+        msg.attach(MIMEText(body, 'plain'))
+
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.send_message(msg)
+
+        print(f"[✉] Email sent: {subject}")
+    except Exception as e:
+        print(f"[✗] Failed to send email: {e}")
+
+
+def process_alerts():
+    """Check alerts and notify if any are missing tickets."""
+    alerts = get_recent_alerts()
+
+    if not alerts:
+        print("[!] No alerts to process.")
+        return
+
+    for alert in alerts:
+        alert_id = alert.get("id")
+        severity = alert.get("severity")
+        description = alert.get("description", "No description")
+
+        if check_ticket_created(alert):
+            print(f"[✓] Ticket exists for Alert ID {alert_id} | Severity: {severity}")
+        else:
+            print(f"[✗] No ticket for Alert ID {alert_id} | Severity: {severity}")
+            # Trigger email
+            subject = f"[ALERT] No Ticket for {severity.upper()} Alert ID {alert_id}"
+            body = f"""Alert ID: {alert_id}
+Severity: {severity}
+Description: {description}
+
+Please investigate why no ticket has been generated."""
+            send_email(subject, body)
+
+# -------------------- MAIN SCRIPT --------------------
+
+if __name__ == "__main__":
+    print("🚦 Starting Moogsoft Ticket Monitor")
+
+    if check_moogsoft_health():
+        process_alerts()
+    else:
+        print("[!] Skipping alert check due to API failure.")
