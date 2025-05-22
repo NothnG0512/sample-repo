@@ -68,14 +68,26 @@ def check_ticket_created(alert):
     return False
 
 
-def send_email(subject, body):
-    """Send email via SMTP when ticket is missing."""
+def send_summary_email(missing_alerts):
+    """Send one email listing all alerts missing tickets."""
+    if not missing_alerts:
+        print("[✓] All alerts have tickets. No email needed.")
+        return
+
     try:
+        subject = f"[ALERT] {len(missing_alerts)} High/Critical Alerts Without Tickets"
+
+        body = "The following alerts are missing tickets:\n\n"
+        for alert in missing_alerts:
+            alert_id = alert.get("id")
+            severity = alert.get("severity")
+            description = alert.get("description", "No description provided")
+            body += f"- Alert ID: {alert_id} | Severity: {severity} | Description: {description}\n"
+
         msg = MIMEMultipart()
         msg['From'] = EMAIL_SENDER
         msg['To'] = EMAIL_RECEIVER
         msg['Subject'] = subject
-
         msg.attach(MIMEText(body, 'plain'))
 
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
@@ -83,7 +95,8 @@ def send_email(subject, body):
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.send_message(msg)
 
-        print(f"[✉] Email sent: {subject}")
+        print(f"[✉] Summary email sent with {len(missing_alerts)} missing ticket(s).")
+
     except Exception as e:
         print(f"[✗] Failed to send email: {e}")
 
@@ -91,6 +104,7 @@ def send_email(subject, body):
 def process_alerts():
     """Check alerts and notify if any are missing tickets."""
     alerts = get_recent_alerts()
+    missing_alerts = []
 
     if not alerts:
         print("[!] No alerts to process.")
@@ -99,20 +113,15 @@ def process_alerts():
     for alert in alerts:
         alert_id = alert.get("id")
         severity = alert.get("severity")
-        description = alert.get("description", "No description")
 
         if check_ticket_created(alert):
             print(f"[✓] Ticket exists for Alert ID {alert_id} | Severity: {severity}")
         else:
             print(f"[✗] No ticket for Alert ID {alert_id} | Severity: {severity}")
-            # Trigger email
-            subject = f"[ALERT] No Ticket for {severity.upper()} Alert ID {alert_id}"
-            body = f"""Alert ID: {alert_id}
-Severity: {severity}
-Description: {description}
+            missing_alerts.append(alert)
 
-Please investigate why no ticket has been generated."""
-            send_email(subject, body)
+    # Send one email for all missing alerts
+    send_summary_email(missing_alerts)
 
 # -------------------- MAIN SCRIPT --------------------
 
