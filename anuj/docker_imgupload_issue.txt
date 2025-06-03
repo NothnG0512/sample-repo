@@ -1,0 +1,77 @@
+Thanks for sharing your pipeline. You're very close, but the issue is exactly where expected:
+
+🔴 Problem:
+You're using this:
+
+groovy
+Copy
+Edit
+docker.withRegistry( vprofileRegistry, registryCredential )
+But:
+
+vprofileRegistry = "363432769.dkr.ecr.us-east-1.amazonaws.com" → this is not a valid full ECR registry URL (it’s missing the protocol).
+
+You're using docker.withRegistry() which does not support AWS ECR authentication correctly because ECR requires temporary tokens from aws ecr get-login-password.
+
+✅ Solution: Replace Upload Logic with AWS CLI-Based Push
+Update your Upload App Image stage to manually login and push the image using AWS CLI instead of Jenkins’ Docker plugin.
+
+🔁 Replace This:
+groovy
+Copy
+Edit
+stage('Upload App Image') {
+  steps{
+    script {
+      docker.withRegistry( vprofileRegistry, registryCredential ) {
+        dockerImage.push("$BUILD_NUMBER")
+        dockerImage.push('latest')
+      }
+    }
+  }
+}
+✅ With This:
+groovy
+Copy
+Edit
+stage('Upload App Image') {
+  steps {
+    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'awscreds']]) {
+      sh '''
+        aws ecr get-login-password --region us-east-1 | \
+        docker login --username AWS --password-stdin 363432769.dkr.ecr.us-east-1.amazonaws.com
+
+        docker tag 363432769.dkr.ecr.us-east-1.amazonaws.com/appimg:$BUILD_NUMBER \
+                   363432769.dkr.ecr.us-east-1.amazonaws.com/appimg:latest
+
+        docker push 363432769.dkr.ecr.us-east-1.amazonaws.com/appimg:$BUILD_NUMBER
+        docker push 363432769.dkr.ecr.us-east-1.amazonaws.com/appimg:latest
+      '''
+    }
+  }
+}
+🔧 Summary of Changes
+Change	Why
+Removed docker.withRegistry()	It can’t handle AWS ECR's token-based auth
+Used aws ecr get-login-password	ECR needs temporary token for login
+Used docker tag manually	To ensure latest is pushed
+Used sh to push	Pushes directly using Docker CLI
+
+📌 Final Notes
+Ensure Jenkins has:
+
+AWS CLI installed.
+
+Docker installed and running on the agent.
+
+Make sure awscreds is an "AWS Credentials" type in Jenkins.
+
+Let me know if you want help verifying whether Docker/AWS CLI are installed on your Jenkins agent or how to test this updated step.
+
+
+
+
+
+
+
+
